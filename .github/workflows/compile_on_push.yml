@@ -1,0 +1,87 @@
+name: 5. Compile Trio on every commit
+
+run-name: "Compile Trio · ${{ github.ref_name }} · ${{ github.sha }}"
+
+on:
+  push:
+  workflow_dispatch:
+
+# This workflow is a compile check; it never signs an IPA, changes
+# certificates, or publishes to TestFlight.
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    name: Compile Trio (iOS Simulator)
+    runs-on: macos-26
+    timeout-minutes: 90
+
+    steps:
+      - name: Link to this build
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+        run: |
+          {
+            echo "## Trio compilation"
+            echo ""
+            echo "- **Workflow run:** [Open live build status](${RUN_URL})"
+            echo "- **Branch:** \`${GITHUB_REF_NAME}\`"
+            echo "- **Commit:** [${GITHUB_SHA:0:12}](${COMMIT_URL})"
+            echo "- **Distribution:** compile-only; no TestFlight upload"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Checkout source and submodules
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.5.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Compile Trio without signing (iOS Simulator)
+        id: compile
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -workspace Trio.xcworkspace \
+            -scheme Trio \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            2>&1 | tee trio-compile.log
+
+      - name: Display relevant compilation errors
+        if: failure()
+        run: |
+          if [ -f trio-compile.log ]; then
+            grep -nE 'error:|BUILD FAILED|The following build commands failed' trio-compile.log | tail -n 80 || true
+          fi
+
+      - name: Upload compilation log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trio-compile-log
+          path: trio-compile.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Publish build result
+        if: always()
+        env:
+          RESULT: ${{ steps.compile.outcome }}
+        run: |
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "**Compile step result:** ${RESULT}" >> "${GITHUB_STEP_SUMMARY}"
