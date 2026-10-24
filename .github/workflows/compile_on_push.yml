@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   compile:
-    name: Compile Trio (iOS Simulator)
+    name: Compile Trio (iOS + watchOS)
     runs-on: macos-26
     timeout-minutes: 90
 
@@ -43,7 +43,7 @@ jobs:
           sudo xcode-select --switch /Applications/Xcode_26.5.app/Contents/Developer
           xcodebuild -version
 
-      - name: Compile Trio without signing (iOS Simulator)
+      - name: Compile Trio without signing (iOS + watchOS)
         id: compile
         shell: bash
         run: |
@@ -51,9 +51,8 @@ jobs:
           xcodebuild build \
             -workspace Trio.xcworkspace \
             -scheme Trio \
-            -configuration Debug \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
             -onlyUsePackageVersionsFromResolvedFile \
             -skipPackagePluginValidation \
             -skipMacroValidation \
