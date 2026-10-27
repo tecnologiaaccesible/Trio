@@ -25,6 +25,8 @@ extension Home {
         @State var isMenuPresented = false
         @State var showTreatments = false
         @State var selectedTab: Int = 0
+        @State private var showTabDiagnostics = false
+        @State private var tabDiagnostics = "Sin diagnóstico. Abre la pestaña Ajustes y vuelve a esta pantalla."
         static let treatmentTabTag = 4
         @State var showQuickPickTreatmentsPicker = false
         @State var showQuickPickTreatmentsNoHistory = false
@@ -411,12 +413,25 @@ extension Home {
                     NavigationStack(path: self.$settingsPath) {
                         Settings.RootView(resolver: resolver) }
                         .environment(settingsSearchHighlight)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Diagnóstico VoiceOver") {
+                                    showTabDiagnostics = true
+                                }
+                            }
+                        }
                         .tabItem { Label(
                             "",
                             systemImage: "gear"
                         ).accessibilityLabel(Text("Settings")) }.tag(3)
                 }
                 .tint(Color.tabBar)
+                .background {
+                    TabAccessibilityDiagnostics { report in
+                        tabDiagnostics = report
+                    }
+                    .frame(width: 0, height: 0)
+                }
 
                 // fixed distance from the physical screen bottom; immune to
                 // safe-area changes (keyboard, accessories)
@@ -426,6 +441,28 @@ extension Home {
                 }
                 .ignoresSafeArea(.all, edges: .bottom)
             }
+            .sheet(isPresented: $showTabDiagnostics) {
+                NavigationStack {
+                    ScrollView {
+                        Text(tabDiagnostics)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                            .textSelection(.enabled)
+                    }
+                    .navigationTitle("Diagnóstico VoiceOver")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Cerrar") { showTabDiagnostics = false }
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Copiar diagnóstico") {
+                                UIPasteboard.general.string = tabDiagnostics
+                                UIAccessibility.post(notification: .announcement, argument: "Diagnóstico copiado")
+                            }
+                        }
+                    }
+                }
+            }
             .ignoresSafeArea(.container, edges: .bottom)
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .blur(radius: state.waitForSuggestion ? 8 : 0)
@@ -433,6 +470,84 @@ extension Home {
                 if selectedTab != 3, !settingsPath.isEmpty {
                     settingsPath = NavigationPath()
                 }
+            }
+        }
+
+        /// Read-only instrumentation. Does not modify UIKit accessibility or dosing.
+        @available(iOS 26.0, *)
+        private struct TabAccessibilityDiagnostics: UIViewControllerRepresentable {
+            let onReport: (String) -> Void
+
+            final class Controller: UIViewController {
+                var onReport: ((String) -> Void)?
+                var lastReport: String?
+
+                override func loadView() {
+                    let view = UIView(frame: .zero)
+                    view.isUserInteractionEnabled = false
+                    view.isAccessibilityElement = false
+                    self.view = view
+                }
+
+                override func didMove(toParent parent: UIViewController?) {
+                    super.didMove(toParent: parent)
+                    refresh()
+                }
+
+                override func viewDidAppear(_ animated: Bool) {
+                    super.viewDidAppear(animated)
+                    refresh()
+                }
+
+                func refresh() {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, let window = self.view.window else { return }
+                        var lines: [String] = [
+                            "TrioA11Y | iOS=\(UIDevice.current.systemVersion)",
+                            "Controller=\(String(describing: type(of: self)))",
+                            "tabBarControllerFound=\(self.tabBarController != nil)"
+                        ]
+                        self.scan(window, into: &lines)
+                        let report = lines.joined(separator: "\n")
+                        guard report != self.lastReport else { return }
+                        self.lastReport = report
+                        NSLog("[TrioA11Y] %@", report)
+                        self.onReport?(report)
+                    }
+                }
+
+                private func scan(_ view: UIView, into lines: inout [String]) {
+                    if let bar = view as? UITabBar {
+                        let buttons = bar.subviews
+                            .filter { String(describing: type(of: $0)).contains("UITabBarButton") }
+                            .sorted { $0.frame.midX < $1.frame.midX }
+                        let elements = bar.accessibilityElements
+                        lines.append("tabItems=\(bar.items?.count ?? -1), buttons=\(buttons.count), accessibilityElements=\(elements?.count ?? -1)")
+                        for (index, button) in buttons.enumerated() {
+                            lines.append("button[\(index)] label=\(button.accessibilityLabel ?? "<nil>"), accessible=\(button.isAccessibilityElement), descendantsHidden=\(button.accessibilityElementsHidden)")
+                        }
+                        if let elements {
+                            for (index, element) in elements.enumerated() {
+                                let label = (element as? UIView)?.accessibilityLabel
+                                    ?? (element as? UIAccessibilityElement)?.accessibilityLabel
+                                    ?? "<nil>"
+                                lines.append("element[\(index)] type=\(type(of: element)), label=\(label)")
+                            }
+                        }
+                    }
+                    for child in view.subviews { scan(child, into: &lines) }
+                }
+            }
+
+            func makeUIViewController(context: Context) -> Controller {
+                let controller = Controller()
+                controller.onReport = onReport
+                return controller
+            }
+
+            func updateUIViewController(_ controller: Controller, context: Context) {
+                controller.onReport = onReport
+                controller.refresh()
             }
         }
 
