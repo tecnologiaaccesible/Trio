@@ -511,10 +511,20 @@ extension Home {
                     DispatchQueue.main.async { [weak self] in
                         guard let self, let window = self.view.window else { return }
                         var lines: [String] = [
-                            "TrioA11Y | iOS=\(UIDevice.current.systemVersion)",
-                            "Controller=\(String(describing: type(of: self)))",
-                            "tabBarControllerFound=\(self.tabBarController != nil)"
+                            "TrioA11Y extended | iOS=\(UIDevice.current.systemVersion)",
+                            "selection (diagnostics only): not changed",
+                            "embeddedTabBarController=\(self.tabBarController != nil)"
                         ]
+                        var ancestor = self.parent
+                        var chain: [String] = []
+                        while let controller = ancestor, chain.count < 15 {
+                            chain.append(String(describing: type(of: controller)))
+                            ancestor = controller.parent
+                        }
+                        lines.append("parentControllers=\(chain.joined(separator: " > "))")
+                        if let root = window.rootViewController {
+                            self.describeControllers(root, depth: 0, into: &lines)
+                        }
                         self.scan(window, into: &lines)
                         let report = lines.joined(separator: "\n")
                         guard report != self.lastReport else { return }
@@ -524,26 +534,58 @@ extension Home {
                     }
                 }
 
+                private func describeControllers(_ controller: UIViewController,
+                                                 depth: Int, into lines: inout [String]) {
+                    guard depth < 8 else { return }
+                    lines.append("controller[\(depth)]=\(type(of: controller)) children=\(controller.children.count) presented=\(controller.presentedViewController != nil)")
+                    if let tabs = controller as? UITabBarController {
+                        lines.append("nativeTabController tabs=\(tabs.viewControllers?.count ?? -1) selected=\(tabs.selectedIndex)")
+                    }
+                    for child in controller.children.prefix(12) {
+                        describeControllers(child, depth: depth + 1, into: &lines)
+                    }
+                    if let presented = controller.presentedViewController {
+                        describeControllers(presented, depth: depth + 1, into: &lines)
+                    }
+                }
+
                 private func scan(_ view: UIView, into lines: inout [String]) {
                     if let bar = view as? UITabBar {
-                        let buttons = bar.subviews
-                            .filter { String(describing: type(of: $0)).contains("UITabBarButton") }
-                            .sorted { $0.frame.midX < $1.frame.midX }
-                        let elements = bar.accessibilityElements
-                        lines.append("tabItems=\(bar.items?.count ?? -1), buttons=\(buttons.count), accessibilityElements=\(elements?.count ?? -1)")
-                        for (index, button) in buttons.enumerated() {
-                            lines.append("button[\(index)] label=\(button.accessibilityLabel ?? "<nil>"), accessible=\(button.isAccessibilityElement), descendantsHidden=\(button.accessibilityElementsHidden)")
+                        lines.append("UITabBar frame=\(bar.frame) subviews=\(bar.subviews.count) items=\(bar.items?.count ?? -1)")
+                        for (index, item) in (bar.items ?? []).enumerated() {
+                            lines.append("item[\(index)] title=\(item.title ?? "<nil>") label=\(item.accessibilityLabel ?? "<nil>") identifier=\(item.accessibilityIdentifier ?? "<nil>") enabled=\(item.isEnabled)")
                         }
-                        if let elements {
-                            for (index, element) in elements.enumerated() {
+                        lines.append("bar accessibilityElements=\(bar.accessibilityElements?.count ?? -1) accessible=\(bar.isAccessibilityElement) hidden=\(bar.accessibilityElementsHidden)")
+                        if let elements = bar.accessibilityElements {
+                            for (index, element) in elements.prefix(25).enumerated() {
                                 let label = (element as? UIView)?.accessibilityLabel
                                     ?? (element as? UIAccessibilityElement)?.accessibilityLabel
                                     ?? "<nil>"
-                                lines.append("element[\(index)] type=\(type(of: element)), label=\(label)")
+                                lines.append("barElement[\(index)] type=\(type(of: element)) label=\(label)")
                             }
                         }
+                        describeSubviews(bar, depth: 0, into: &lines)
                     }
                     for child in view.subviews { scan(child, into: &lines) }
+                }
+
+                private func describeSubviews(_ view: UIView, depth: Int,
+                                              into lines: inout [String]) {
+                    guard depth <= 4 else { return }
+                    let label = view.accessibilityLabel ?? "<nil>"
+                    let identifier = view.accessibilityIdentifier ?? "<nil>"
+                    lines.append("view[\(depth)] type=\(type(of: view)) frame=\(view.frame) label=\(label) identifier=\(identifier) accessible=\(view.isAccessibilityElement) hidden=\(view.accessibilityElementsHidden) children=\(view.subviews.count) accessibilityChildren=\(view.accessibilityElements?.count ?? -1)")
+                    if let elements = view.accessibilityElements, depth > 0 {
+                        for (index, element) in elements.prefix(12).enumerated() {
+                            let elementLabel = (element as? UIView)?.accessibilityLabel
+                                ?? (element as? UIAccessibilityElement)?.accessibilityLabel
+                                ?? "<nil>"
+                            lines.append("viewElement[\(depth),\(index)] type=\(type(of: element)) label=\(elementLabel)")
+                        }
+                    }
+                    for child in view.subviews.prefix(24) {
+                        describeSubviews(child, depth: depth + 1, into: &lines)
+                    }
                 }
             }
 
