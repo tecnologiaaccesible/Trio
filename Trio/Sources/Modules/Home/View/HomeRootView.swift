@@ -445,6 +445,7 @@ extension Home {
                 GeometryReader { geo in
                     treatmentButton
                         .position(x: geo.size.width / 2, y: geo.size.height - 52)
+                        .accessibilitySortPriority(100)
                 }
                 .ignoresSafeArea(.all, edges: .bottom)
             }
@@ -551,6 +552,11 @@ extension Home {
 
                 private func scan(_ view: UIView, into lines: inout [String]) {
                     if let bar = view as? UITabBar {
+                        // iOS 27.2 exposes two sets of _UITabButton controls,
+                        // one each under SelectedContentView and ContentView.
+                        // Only the middle one of five is the dummy spacer.
+                        let hiddenCount = hideDummyButtons(in: bar)
+                        lines.append("centralDummyButtonsHidden=\(hiddenCount)")
                         lines.append("UITabBar frame=\(bar.frame) subviews=\(bar.subviews.count) items=\(bar.items?.count ?? -1)")
                         for (index, item) in (bar.items ?? []).enumerated() {
                             lines.append("item[\(index)] title=\(item.title ?? "<nil>") label=\(item.accessibilityLabel ?? "<nil>") identifier=\(item.accessibilityIdentifier ?? "<nil>") enabled=\(item.isEnabled)")
@@ -567,6 +573,34 @@ extension Home {
                         describeSubviews(bar, depth: 0, into: &lines)
                     }
                     for child in view.subviews { scan(child, into: &lines) }
+                }
+
+                private func hideDummyButtons(in bar: UITabBar) -> Int {
+                    guard bar.items?.count == 5 else { return 0 }
+                    var hiddenCount = 0
+
+                    func visit(_ container: UIView) {
+                        let containerType = String(describing: type(of: container))
+                        if containerType == "ContentView" || containerType == "SelectedContentView" {
+                            let controls = container.subviews
+                                .filter { String(describing: type(of: $0)) == "_UITabButton" }
+                                .sorted { $0.frame.midX < $1.frame.midX }
+                            if controls.count == 5 {
+                                let middle = controls[2]
+                                let label = middle.accessibilityLabel ?? ""
+                                // Do not hide other controls if the expected
+                                // blank spacer has been changed by SwiftUI.
+                                if label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    middle.isAccessibilityElement = false
+                                    middle.accessibilityElementsHidden = true
+                                    hiddenCount += 1
+                                }
+                            }
+                        }
+                        for subview in container.subviews { visit(subview) }
+                    }
+                    visit(bar)
+                    return hiddenCount
                 }
 
                 private func describeSubviews(_ view: UIView, depth: Int,
