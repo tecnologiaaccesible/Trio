@@ -411,15 +411,22 @@ extension Home {
                             ).accessibilityLabel(Text("Adjustments")) }.tag(2)
 
                     NavigationStack(path: self.$settingsPath) {
-                        Settings.RootView(resolver: resolver) }
-                        .environment(settingsSearchHighlight)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Diagnóstico VoiceOver") {
+                        Settings.RootView(resolver: resolver)
+                            .safeAreaInset(edge: .top, spacing: 0) {
+                                Button {
                                     showTabDiagnostics = true
+                                } label: {
+                                    Label("Diagnóstico VoiceOver", systemImage: "waveform.path.ecg")
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 10)
                                 }
+                                .buttonStyle(.bordered)
+                                .accessibilityLabel("Diagnóstico VoiceOver")
+                                .accessibilityHint("Abre los datos técnicos de las pestañas para copiarlos")
+                                .padding(.horizontal)
                             }
-                        }
+                    }
+                        .environment(settingsSearchHighlight)
                         .tabItem { Label(
                             "",
                             systemImage: "gear"
@@ -427,7 +434,7 @@ extension Home {
                 }
                 .tint(Color.tabBar)
                 .background {
-                    TabAccessibilityDiagnostics { report in
+                    TabAccessibilityDiagnostics(selection: selectedTab) { report in
                         tabDiagnostics = report
                     }
                     .frame(width: 0, height: 0)
@@ -476,6 +483,7 @@ extension Home {
         /// Read-only instrumentation. Does not modify UIKit accessibility or dosing.
         @available(iOS 26.0, *)
         private struct TabAccessibilityDiagnostics: UIViewControllerRepresentable {
+            let selection: Int
             let onReport: (String) -> Void
 
             final class Controller: UIViewController {
